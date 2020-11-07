@@ -16,7 +16,7 @@
 #include "credentials.h"
 
 
-void ota_handle( void * parameter )
+void process_heater( void * parameter )
 {
   while(1){
     ArduinoOTA.handle();
@@ -85,7 +85,7 @@ void setupOTA(const char* nameprefix) {
   Serial.println(WiFi.localIP());
 
   xTaskCreatePinnedToCore(
-    ota_handle,          /* Task function. */
+    process_heater,          /* Task function. */
     "OTA_HANDLE",        /* String with name of task. */
     10000,            /* Stack size in bytes. */
     NULL,             /* Parameter passed as input of the task */
