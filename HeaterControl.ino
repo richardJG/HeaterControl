@@ -76,6 +76,9 @@ unsigned long last1;
 unsigned long boostTime;
 uint8_t lastmode;
 
+QueueHandle_t queue;
+int queueSize = 10;
+
 
 // START OF PROGRAM ********
 #include "heaterlogic.h"
@@ -132,17 +135,38 @@ uint8_t lastmode;
   last10 = now();
   last1 = millis();
   lastday = now();
+
+  queue = xQueueCreate(queueSize, sizeof(String *));
+  if( queue == NULL){
+    Serial.println("Error creating Q");
+  }
+
+  disableCore0WDT();   // disable watchdog timer for serial port handler
+  xTaskCreatePinnedToCore(
+    process_heater,          /* Task function. */
+    "OTA_HANDLE",        /* String with name of task. */
+    10000,            /* Stack size in bytes. */
+    NULL,             /* Parameter passed as input of the task */
+    5,                /* Priority of the task. */
+    NULL,            /* Task handle. */
+    0);              // core 0
+  
 }
 
 
 void loop() {
 
+  char *botMsg;
 
+  if (xQueueReceive(queue, &botMsg, 0) == pdPASS){
+    bot.sendMessage(CHAT_ID, botMsg, "");
+  }
   if(now() - lastday >= 86400){
     syncTime();
     lastday = now();
   }
 
+/*
   if (now() - last10 >= TEMP_TIME) {
     // every 10 secs check if heater needs to switch on
     airTemp = getTemp();
@@ -224,6 +248,7 @@ void loop() {
 
     last10 = now();
   }
+*/
   if (millis() - last1 >= TELEGRAM_TIME) {  // check for new telegram commands every secon
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     while (numNewMessages) {
@@ -231,7 +256,7 @@ void loop() {
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
 
-    
+    ArduinoOTA.handle();
     last1 = millis();
   }
 }

@@ -1,5 +1,8 @@
 // START OF PROGRAM ********
 
+
+
+
 void syncTime(void) {
   configTime(gmtOffset_sec, daylightOffset_sec, "time.google.com");
   time_t now = time(nullptr);
@@ -40,6 +43,16 @@ int gTime(char * sz) {
   }
   sscanf(sz, "%d %c %d", &t1, &s, &t2);
   return (t1 * 60 + t2);
+}
+
+String timeasString(unsigned long t){
+  char ton[20], tr[22];
+  unsigned int hr, mn, sc;
+  hr = totTime / 3600;
+  mn = (totTime - hr * 3600) / 60;
+  sc = totTime - (hr * 3600) - (mn * 60);
+  sprintf(ton, "%d:%02d:%02d", hr, mn, sc);
+  return String(ton);
 }
 
 
@@ -126,7 +139,7 @@ void handleNewMessages(int numNewMessages) {
     }
     
     if (text == "status") {
-      char timeStr[20];
+      char timeStr[20], tr[25];
 
       sprintf(timeStr, "%02d:%02d:%02d", hour(), minute(), second());
       welcome = "Status:   \n";
@@ -162,19 +175,14 @@ void handleNewMessages(int numNewMessages) {
       } else {
         welcome += "OFF\n";
       }
-      char ton[20], tr[22];
-      unsigned int hr, mn, sc;
       if (hstate){
         // heater is on so find out how long since timeoff
         totTime += (now() - onTime);
         onTime = now();
       }
-      hr = totTime / 3600;
-      mn = (totTime - hr * 3600) / 60;
-      sc = totTime - (hr * 3600) - (mn * 60);
-      sprintf(ton, "%d:%02d:%02d", hr, mn, sc);
+
       sprintf(tr, "%d/%d/%d - %02d:%02d", day(lastReset), month(lastReset), year(lastReset), hour(lastReset), minute(lastReset));
-      welcome += "Heater on: " + String(ton) + " since " + String(tr) + "\n";
+      welcome += "Heater on: " + timeasString(totTime) + " since " + String(tr) + "\n";
     }
 
     if (text == "sync") {
@@ -298,6 +306,14 @@ void handleNewMessages(int numNewMessages) {
 }
 
 
+void sendBotMessage(String t){
+  static char botMsg[50];
+  t.toCharArray(botMsg, t.length() + 1);
+  char *ch = botMsg;
+  xQueueSend(queue, &ch, portMAX_DELAY); 
+}
+
+
 float getTemp(void) {
 
   sensors.requestTemperatures(); 
@@ -306,6 +322,7 @@ float getTemp(void) {
 }
 
 bool setHeater(bool newState) {
+   unsigned long deltaOnTime;
   
   if(hstate != newState) {
     // set GPIO to control radiator on/off
@@ -317,23 +334,110 @@ bool setHeater(bool newState) {
     else {
       offTime = now();
       if(offTime > onTime){
-        totTime += (offTime - onTime);
+        deltaOnTime = (offTime - onTime); 
+        totTime += deltaOnTime;
         onTime = offTime;
       }
       digitalWrite(HEATER, HEATER_OFF);
-    }
-//    if(logging){
       char sz[10];
       sprintf(sz, "%02d:%02d:%02d", hour(), minute(), second());
-      String text = String(sz) + " Heater:- ";  
-      if (newState) {
+      String text = String(sz) + " Heater on for:- " + timeasString(deltaOnTime) + "\n";  
+
+      Serial.println(text);
+      sendBotMessage(text);
+    }
+  }
+  return ( newState );
+}
+
+
+
+void process_heater( void * parameter )
+{
+  while(1){
+
+
+    
+  if (now() - last10 >= TEMP_TIME) {
+    airTemp = getTemp();
+    uint8_t zone = getZone(now());
+    switch(hmode){
+      case 0 :
+        hstate = setHeater(false);
+      break;
+      case 1 :
+        hstate = setHeater(true);
+      break;
+      case 2 :{
+        if (airTemp < (float)(htemp[zone] - hysT)) {
+          hstate = setHeater(true);
+         }
+        if (airTemp > (float)(htemp[zone] + hysT)) {
+          hstate = setHeater(false);
+        }
+      }
+      break;
+      case 3:{
+        if(now() > boostTime){
+          hmode = lastmode;
+          hstate = setHeater(false);
+        } else
+          hstate = setHeater(true);
+        
+      }
+      break;
+    }
+    String text = "";
+    if(logging){
+      char sz[10];
+      sprintf(sz, "%02d:%02d:%02d", hour(), minute(), second());
+      text = String(sz) + " Air:- " + String(airTemp, 1);
+      text += " Req: " + String(htemp[zone]);
+      text += " Heater: ";  
+      if (hstate) {
         text += "ON";
       } else {
         text += "OFF";
       }
-      text += " at : " +String(airTemp, 1) + "\n";
-      bot.sendMessage(CHAT_ID, text, "");
+      text += "\n";
+
+      sendBotMessage(text);
     }
-//  }
-  return ( newState );
+
+    // check if we are still connected to internet
+    if(! Ping.ping(ping_host, 1)) {
+      String xt = "Ping failed -";
+      if(WiFi.reconnect()){
+        xt += "Reconnecting to wiFi";   
+      } else {
+        xt += "Restarting WiFi";
+        WiFi.begin(ssid, password);
+      }
+       while(WiFi.waitForConnectResult() != WL_CONNECTED){
+        // save current state of variables
+        EEPROM.put(teehmode, hmode);
+        EEPROM.put(teehtemp, htemp);
+        EEPROM.put(teehzone, hzone);
+        EEPROM.put(teedst, dst);
+        EEPROM.put(teehyst, hysT);
+        if (hstate){
+          // heater is on so find out how long since timeoff 
+          totTime += (now() - onTime);
+        }
+        EEPROM.put(teetotTime, totTime);
+        pRestart = 1;
+        EEPROM.put(teepRestart, pRestart);
+        EEPROM.put(teelastReset, lastReset);
+        EEPROM.commit();
+        delay(2);
+        ESP.restart();
+      }
+      xt += ": OK\n";
+      sendBotMessage(xt);
+    }
+
+    last10 = now();
+  }
+
+  }
 }
