@@ -46,11 +46,11 @@ int gTime(char * sz) {
 }
 
 String timeasString(unsigned long t){
-  char ton[20], tr[22];
+  char ton[25];
   unsigned int hr, mn, sc;
-  hr = totTime / 3600;
-  mn = (totTime - hr * 3600) / 60;
-  sc = totTime - (hr * 3600) - (mn * 60);
+  hr = t / 3600;
+  mn = (t - hr * 3600) / 60;
+  sc = t - (hr * 3600) - (mn * 60);
   sprintf(ton, "%d:%02d:%02d", hr, mn, sc);
   return String(ton);
 }
@@ -59,7 +59,13 @@ String timeasString(unsigned long t){
 void handleNewMessages(int numNewMessages) {
   
   static bool waitforYes = false;
-  String JSonCmd =  "[[\"On\", \"Off\", \"Auto\",\"Boost\"],[\"Status\",\"Help\"],[\"Temp\",\"Time\",\"Sync\",\"Hyst\"]]"; 
+  static bool tempSet = false;
+  static uint8_t tempSetCount = 0;
+  static bool timeSet = false;
+  static uint8_t timeSetCount;
+  
+
+  String JSonCmd =  "[[\"On\", \"Off\", \"Auto\",\"Boost\"],[\"Status\",\"Settings\"],[\"Help\",\"Set Time\",\"Set Temp\"]]"; 
   
   Serial.print("Handle New Messages: ");
   Serial.println(numNewMessages);
@@ -87,26 +93,143 @@ void handleNewMessages(int numNewMessages) {
     }
 
     waitforYes = false;
+
+    if(tempSet){
+
+      char ch[30];
+      char *token;
+      int z, t;
+      String sTo;
+      
+      text.toCharArray(ch, text.length() + 1);
+      if(sscanf(ch, "%d", &t) > 0){
+        if((t >= 5) && (t <= 30)){
+          htemp[tempSetCount] = t;
+        }
+        text = "next";
+      }
+
+      if(text == "end"){
+          tempSet = false;
+          tempSetCount = 0;
+          welcome = "Finished";
+      } else {
+        if(text == "next"){
+          tempSetCount++;
+          if(tempSetCount <= 3){
+            (tempSetCount < 3) ? sTo = pTime(hzone[tempSetCount]) : sTo = "23:59";
+            welcome = String(tempSetCount + 1) + ". " + pTime(hzone[tempSetCount - 1]) + " to " + sTo + ". Temp: " + String(htemp[tempSetCount]) + "\n";
+            welcome += "Send new temp, Next or End\n";
+          }
+          if(tempSetCount > 3) {
+            // finished last setting so reset
+            tempSet = false;
+            tempSetCount  = 0;
+            welcome = "Finished";
+          }
+        } else {
+          tempSet = false;
+        }
+        
+        bot.sendMessageWithReplyKeyboard(chat_id, welcome, "", JSonCmd, true);
+        return;
+      }
+    }
+    
+    if(timeSet){
+
+      char ch[30];
+      char *token;
+      int z, t;
+      String sTo;
+      
+      text.toCharArray(ch, text.length() + 1);
+      t = gTime(ch);
+      if((t > 0) && (t < 1460)){
+        hzone[timeSetCount] = t;
+        text = "next";
+      }
+
+      if(text == "end"){
+          timeSet = false;
+          timeSetCount = 0;
+          welcome = "Finished";
+      } else {
+        if(text == "next"){
+          timeSetCount++;
+          if(timeSetCount <= 2){
+            welcome = "Zone " + String(timeSetCount + 1) + ". ends at " + pTime(hzone[timeSetCount]) + "\n";
+            welcome += "Send new time, Next or End\n";
+          }
+          if(timeSetCount > 2) {
+            // finished last setting so reset
+            timeSet = false;
+            timeSetCount  = 0;
+            welcome = "Finished";
+          }
+        } else {
+          timeSet = false;
+        }
+        
+        bot.sendMessageWithReplyKeyboard(chat_id, welcome, "", JSonCmd, true);
+        return;
+      }
+    }
+ 
+    
     if (text == "reset"){
       welcome = "Reset..Send Yes to confirm\n";
       waitforYes = true; 
     }
     
+    if(text == "set temp"){
+      tempSet = true;
+      tempSetCount = 0;
+      welcome = "1. 00:00 to " + pTime(hzone[0]) + ". Temp: " + String(htemp[0]) + "\n";
+      welcome += "Send new temp, Next or End\n";
+      bot.sendMessageWithReplyKeyboard(chat_id, welcome, "", JSonCmd, true);
+      return;
+    }
+    tempSet = false;
+
+    if(text == "set time"){
+      timeSet = true;
+      timeSetCount = 0;
+      welcome = "Zone 1 ends at " + pTime(hzone[0]) + "\n";
+      welcome += "Send new time, Next or End\n";
+      bot.sendMessageWithReplyKeyboard(chat_id, welcome, "", JSonCmd, true);
+      return;
+    }
+    timeSet = false;
+
+    if(text == "settings"){
+      welcome = "Time/Temps\n";
+      welcome += "1. 00:00 to " + pTime(hzone[0]) + ". Temp: " + String(htemp[0]) + "\n2. ";
+      welcome += pTime(hzone[0]) + " to " + pTime(hzone[1]) + ". Temp: " + String(htemp[1]) + "\n3. ";
+      welcome += pTime(hzone[1]) + " to " + pTime(hzone[2]) + ". Temp: " + String(htemp[2]) + "\n4. ";
+      welcome += pTime(hzone[2]) + " to 23:59. Temp: " + String(htemp[3]) + "\n\n";
+      if(dst){
+        welcome += "Daylight saving ON\n";
+      } else {
+        welcome += "Daylight saving OFF\n";
+      }
+      welcome += "Hysteresis setting: " + String(hysT) + " secs\n";
+    }
+        
     if ((text == "help") || (text == "/start")) {
       String from_name = bot.messages[i].from_name;
       welcome = "Welcome , " + from_name + "\n";
       welcome += "Menu: \n";
-      welcome += "Sync : Reset clock\n";
-      welcome += "Off : Heater OFF\n";
       welcome += "On : Heater ON\n";
+      welcome += "Off : Heater OFF\n";
       welcome += "Auto : Heater AUTO\n";
       welcome += "Boost : Switch on for 1 hour\n";
-      welcome += "Status : Status \n";
-      welcome += "Temp : Show/Edit Zone temps \n";
-      welcome += "Time : Show/Edit Time zone boundaries \n";
-      welcome += "DST : toggles DST On/Off\n";
+      welcome += "Status : show current status \n";
+      welcome += "Settings : Show current time/temp settings\n";
+      welcome += "Help: show this help screen\n";
+      welcome += "Set Time: Change time of day boundaries\n";
+      welcome += "Set Temp: Change temps for each zone\n";
       welcome += "Save : Saves params to EEPROM\n";
-
     }
 
     if(text == "boost"){
@@ -159,7 +282,7 @@ void handleNewMessages(int numNewMessages) {
           welcome += "BOOST\n";
       }
       uint8_t gz = getZone(now());
-      welcome += "Zone: " + String(gz) + "\n";
+      welcome += "Zone: " + String(gz + 1) + "\n";
       welcome += "Req temp: " + String(htemp[gz]) + "\n";
       welcome += "Air temp: "  + String(airTemp, 1) + "\n";
       welcome += "Heater: ";
@@ -169,20 +292,14 @@ void handleNewMessages(int numNewMessages) {
       else {
         welcome += "OFF\n";
       }
-      welcome += "DST: ";
-      if (dst) {
-        welcome += "ON\n";
-      } else {
-        welcome += "OFF\n";
-      }
+      welcome += "\n";
       if (hstate){
         // heater is on so find out how long since timeoff
         totTime += (now() - onTime);
         onTime = now();
       }
-
       sprintf(tr, "%d/%d/%d - %02d:%02d", day(lastReset), month(lastReset), year(lastReset), hour(lastReset), minute(lastReset));
-      welcome += "Heater on: " + timeasString(totTime) + " since " + String(tr) + "\n";
+      welcome += "Heater on for: " + timeasString(totTime) + " since " + String(tr) + "\n";
     }
 
     if (text == "sync") {
@@ -230,62 +347,6 @@ void handleNewMessages(int numNewMessages) {
       welcome = "Hysteresis setting: " + String(hysT) + "\n";
     }    
 
-    if (text.startsWith("temp")) {
-      // processing temps for each zone
-      // where temps are comma separatd list with 4 fields field = -1 if temp to be ignore
-      char ch[30];
-      char *token;
-      int z, t;
-
-      text.toCharArray(ch, text.length() + 1);
-      token = strtok(ch, " ");
-      token = strtok(NULL, ",");
-      z = 0;
-      t = 2;
-      while (token != NULL) {
-        t = -1;
-        if(strlen(token) > 0){
-          sscanf(token, "%d", &t);
-        }
-        if (t > 0) {
-          htemp[z] = (uint8_t)t;
-        }
-        z++;
-        token = strtok(NULL, ",");
-      }
-      welcome = "Temp settings: " + String(htemp[0]);
-      for (z = 1; z < 4; z++) {
-        welcome += ", " + String(htemp[z]);
-      }
-      welcome += "\n";
-    }
-
-    if (text.startsWith("time")) {
-      // processing zone times for each zone
-      // where times are comma separatd list with 4 fields field = -1 if time to be ignore
-      char ch[30];
-      char *token;
-      int z, t;
-
-      text.toCharArray(ch, text.length() + 1);
-      token = strtok(ch, " ");
-      token = strtok(NULL, ",");
-      z = 0;
-      t = 2;
-      while (token != NULL) {
-        t = gTime(token);
-        if (t > 0) {
-          hzone[z] = t;
-        }
-        z++;
-        token = strtok(NULL, ",");
-      }
-      welcome = "Zone boundaries: " + pTime(hzone[0]);
-      for (z = 1; z < 3; z++) {
-        welcome += ", " + pTime(hzone[z]);
-      }
-      welcome += "\n";
-    }
 
     if (text == "dst") {
       (dst) ? dst = false  : dst = true;
@@ -300,14 +361,12 @@ void handleNewMessages(int numNewMessages) {
 
     bot.sendMessageWithReplyKeyboard(chat_id, welcome, "", JSonCmd, true);
 
-//    bot.sendMessage(CHAT_ID, welcome, "");
-
   }
 }
 
 
 void sendBotMessage(String t){
-  static char botMsg[50];
+  static char botMsg[60];
   t.toCharArray(botMsg, t.length() + 1);
   char *ch = botMsg;
   xQueueSend(queue, &ch, portMAX_DELAY); 
@@ -354,90 +413,61 @@ bool setHeater(bool newState) {
 
 void process_heater( void * parameter )
 {
+unsigned long last, lastday;
+  last = now();
+  lastday = now();
   while(1){
-
-
+    if(now() - lastday >= 86400){
+      // ressync ESP clock once a day
+      syncTime();
+      lastday = now();
+    }
     
-  if (now() - last10 >= TEMP_TIME) {
-    airTemp = getTemp();
-    uint8_t zone = getZone(now());
-    switch(hmode){
-      case 0 :
-        hstate = setHeater(false);
-      break;
-      case 1 :
-        hstate = setHeater(true);
-      break;
-      case 2 :{
-        if (airTemp < (float)(htemp[zone] - hysT)) {
-          hstate = setHeater(true);
-         }
-        if (airTemp > (float)(htemp[zone] + hysT)) {
+    if (now() - last >= TEMP_TIME) {
+      airTemp = getTemp();
+      uint8_t zone = getZone(now());
+      switch(hmode){
+        case 0 :
           hstate = setHeater(false);
-        }
-      }
-      break;
-      case 3:{
-        if(now() > boostTime){
-          hmode = lastmode;
-          hstate = setHeater(false);
-        } else
+        break;
+        case 1 :
           hstate = setHeater(true);
-        
-      }
-      break;
-    }
-    String text = "";
-    if(logging){
-      char sz[10];
-      sprintf(sz, "%02d:%02d:%02d", hour(), minute(), second());
-      text = String(sz) + " Air:- " + String(airTemp, 1);
-      text += " Req: " + String(htemp[zone]);
-      text += " Heater: ";  
-      if (hstate) {
-        text += "ON";
-      } else {
-        text += "OFF";
-      }
-      text += "\n";
-
-      sendBotMessage(text);
-    }
-
-    // check if we are still connected to internet
-    if(! Ping.ping(ping_host, 1)) {
-      String xt = "Ping failed -";
-      if(WiFi.reconnect()){
-        xt += "Reconnecting to wiFi";   
-      } else {
-        xt += "Restarting WiFi";
-        WiFi.begin(ssid, password);
-      }
-       while(WiFi.waitForConnectResult() != WL_CONNECTED){
-        // save current state of variables
-        EEPROM.put(teehmode, hmode);
-        EEPROM.put(teehtemp, htemp);
-        EEPROM.put(teehzone, hzone);
-        EEPROM.put(teedst, dst);
-        EEPROM.put(teehyst, hysT);
-        if (hstate){
-          // heater is on so find out how long since timeoff 
-          totTime += (now() - onTime);
+        break;
+        case 2 :{
+          if (airTemp < (float)(htemp[zone] - hysT)) {
+            hstate = setHeater(true);
+           }
+          if (airTemp > (float)(htemp[zone] + hysT)) {
+            hstate = setHeater(false);
+          }
         }
-        EEPROM.put(teetotTime, totTime);
-        pRestart = 1;
-        EEPROM.put(teepRestart, pRestart);
-        EEPROM.put(teelastReset, lastReset);
-        EEPROM.commit();
-        delay(2);
-        ESP.restart();
+        break;
+        case 3:{
+          if(now() > boostTime){
+            hmode = lastmode;
+            hstate = setHeater(false);
+          } else
+            hstate = setHeater(true);
+        }
+        break;
       }
-      xt += ": OK\n";
-      sendBotMessage(xt);
+      String text = "";
+      if(logging){
+        char sz[10];
+        sprintf(sz, "%02d:%02d:%02d", hour(), minute(), second());
+        text = String(sz) + " Air:- " + String(airTemp, 1);
+        text += " Req: " + String(htemp[zone]);
+        text += " Heater: ";  
+        if (hstate) {
+          text += "ON";
+        } else {
+          text += "OFF";
+        }
+        text += "\n";
+        //TelnetStream.println(text);
+        sendBotMessage(text);
+      }
+      last = now();
     }
-
-    last10 = now();
-  }
-
   }
 }
